@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "thread_pool/centralized_queue.hpp"
+#include "thread_pool/work_stealing_queue.hpp"
 
 #include <atomic>
 #include <thread>
@@ -162,4 +163,205 @@ TEST(CentralizedQueue, ConcurrentPushPopNoDeadlock) {
 
     ASSERT_EQ(produced.load(), kTotal);
     ASSERT_EQ(consumed.load(), kTotal);
+}
+
+// ===========================================================================
+// M7: WorkStealingQueue — locked circular-buffer deque.
+// ===========================================================================
+
+using tp::WorkStealingQueue;
+
+static_assert(!std::is_copy_constructible_v<WorkStealingQueue>);
+static_assert(!std::is_copy_assignable_v<WorkStealingQueue>);
+
+// ---------------------------------------------------------------------------
+// Capacity is always rounded up to the next power of two.
+// ---------------------------------------------------------------------------
+TEST(WorkStealingQueue, CapacityIsPowerOfTwo) {
+    ASSERT_EQ(WorkStealingQueue{1}.capacity(),   1u);
+    ASSERT_EQ(WorkStealingQueue{2}.capacity(),   2u);
+    ASSERT_EQ(WorkStealingQueue{3}.capacity(),   4u);
+    ASSERT_EQ(WorkStealingQueue{5}.capacity(),   8u);
+    ASSERT_EQ(WorkStealingQueue{16}.capacity(), 16u);
+    ASSERT_EQ(WorkStealingQueue{17}.capacity(), 32u);
+}
+
+// ---------------------------------------------------------------------------
+// pop_bottom on an empty deque returns false immediately.
+// ---------------------------------------------------------------------------
+TEST(WorkStealingQueue, PopBottomOnEmptyReturnsFalse) {
+    WorkStealingQueue q{8};
+    task_t t;
+    ASSERT_FALSE(q.pop_bottom(t));
+}
+
+// ---------------------------------------------------------------------------
+// steal_top on an empty deque returns false immediately.
+// ---------------------------------------------------------------------------
+TEST(WorkStealingQueue, StealTopOnEmptyReturnsFalse) {
+    WorkStealingQueue q{8};
+    task_t t;
+    ASSERT_FALSE(q.steal_top(t));
+}
+
+// ---------------------------------------------------------------------------
+// Owner push/pop follows LIFO order (stack discipline).
+// push A, B, C → pop C, B, A
+// ---------------------------------------------------------------------------
+TEST(WorkStealingQueue, OwnerLIFOOrder) {
+    WorkStealingQueue q{8};
+    std::vector<int> order;
+
+    q.push_bottom([&order] { order.push_back(1); });
+    q.push_bottom([&order] { order.push_back(2); });
+    q.push_bottom([&order] { order.push_back(3); });
+
+    ASSERT_EQ(q.size(), 3u);
+
+    task_t t;
+    while (q.pop_bottom(t)) t();
+
+    ASSERT_EQ(order, (std::vector<int>{3, 2, 1}));
+    ASSERT_TRUE(q.empty());
+}
+
+// ---------------------------------------------------------------------------
+// steal_top follows FIFO order (queue discipline from the other end).
+// push A, B, C → steal A, B, C
+// ---------------------------------------------------------------------------
+TEST(WorkStealingQueue, ThiefFIFOOrder) {
+    WorkStealingQueue q{8};
+    std::vector<int> order;
+
+    q.push_bottom([&order] { order.push_back(1); });
+    q.push_bottom([&order] { order.push_back(2); });
+    q.push_bottom([&order] { order.push_back(3); });
+
+    task_t t;
+    while (q.steal_top(t)) t();
+
+    ASSERT_EQ(order, (std::vector<int>{1, 2, 3}));
+    ASSERT_TRUE(q.empty());
+}
+
+// ---------------------------------------------------------------------------
+// push_bottom returns false (not UB) when the buffer is full.
+// The failed push must not enqueue the task or corrupt state.
+// ---------------------------------------------------------------------------
+TEST(WorkStealingQueue, PushWhenFullReturnsFalse) {
+    WorkStealingQueue q{4};  // capacity = 4 (already a power of two)
+    ASSERT_EQ(q.capacity(), 4u);
+
+    ASSERT_TRUE(q.push_bottom([] {}));
+    ASSERT_TRUE(q.push_bottom([] {}));
+    ASSERT_TRUE(q.push_bottom([] {}));
+    ASSERT_TRUE(q.push_bottom([] {}));
+
+    // One more push must be rejected.
+    ASSERT_FALSE(q.push_bottom([] {}));
+
+    // Existing items are intact.
+    ASSERT_EQ(q.size(), 4u);
+
+    // Drain should succeed exactly 4 times.
+    int count = 0;
+    task_t t;
+    while (q.pop_bottom(t)) ++count;
+    ASSERT_EQ(count, 4);
+    ASSERT_TRUE(q.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Circular wrap-around: push, pop, push again past the original capacity
+// boundary to verify the index arithmetic wraps correctly.
+// ---------------------------------------------------------------------------
+TEST(WorkStealingQueue, IndexWrapsAround) {
+    WorkStealingQueue q{4};
+
+    // Fill and drain twice to force index wrap.
+    for (int round = 0; round < 2; ++round) {
+        std::vector<int> order;
+        for (int i = 1; i <= 4; ++i)
+            ASSERT_TRUE(q.push_bottom([i, &order] { order.push_back(i); }));
+
+        task_t t;
+        while (q.steal_top(t)) t();
+
+        ASSERT_EQ(order, (std::vector<int>{1, 2, 3, 4}));
+        ASSERT_TRUE(q.empty());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 4 thief threads concurrently drain a pre-filled deque.
+// Every task must execute exactly once; no task lost, no double-execution.
+// ---------------------------------------------------------------------------
+TEST(WorkStealingQueue, ConcurrentStealAllTasksExactlyOnce) {
+    constexpr std::size_t kTasks   = 4'000;
+    constexpr int         kThieves = 4;
+
+    WorkStealingQueue q{kTasks};
+    std::atomic<int> counter{0};
+
+    // Phase 1: single owner fills the deque (no concurrency yet).
+    for (std::size_t i = 0; i < kTasks; ++i) {
+        ASSERT_TRUE(q.push_bottom([&counter] {
+            counter.fetch_add(1, std::memory_order_relaxed);
+        }));
+    }
+    ASSERT_EQ(q.size(), kTasks);
+
+    // Phase 2: thieves drain concurrently.
+    {
+        std::vector<std::jthread> thieves;
+        thieves.reserve(kThieves);
+        for (int i = 0; i < kThieves; ++i) {
+            thieves.emplace_back([&q] {
+                task_t t;
+                while (q.steal_top(t)) t();
+            });
+        }
+    } // all thieves joined here
+
+    ASSERT_EQ(counter.load(std::memory_order_relaxed), static_cast<int>(kTasks));
+    ASSERT_TRUE(q.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Owner pops from bottom while thieves steal from top simultaneously.
+// Total executions must equal total pushed; no task skipped or doubled.
+// ---------------------------------------------------------------------------
+TEST(WorkStealingQueue, ConcurrentOwnerPopAndThiefSteal) {
+    constexpr std::size_t kTasks   = 2'000;
+    constexpr int         kThieves = 3;
+
+    WorkStealingQueue q{kTasks};
+    std::atomic<int> counter{0};
+
+    // Fill deque before starting any threads.
+    for (std::size_t i = 0; i < kTasks; ++i) {
+        q.push_bottom([&counter] {
+            counter.fetch_add(1, std::memory_order_relaxed);
+        });
+    }
+
+    // Launch thieves first, then owner pops — all run concurrently.
+    std::vector<std::jthread> thieves;
+    thieves.reserve(kThieves);
+    for (int i = 0; i < kThieves; ++i) {
+        thieves.emplace_back([&q] {
+            task_t t;
+            while (q.steal_top(t)) t();
+        });
+    }
+
+    // Owner competes with thieves.
+    {
+        task_t t;
+        while (q.pop_bottom(t)) t();
+    }
+
+    thieves.clear(); // join
+
+    ASSERT_EQ(counter.load(std::memory_order_relaxed), static_cast<int>(kTasks));
 }
