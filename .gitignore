@@ -48,3 +48,6 @@ benchmark_results/
 # OS artifacts
 .DS_Store
 Thumbs.db
+
+
+docs/DESIGN.md
