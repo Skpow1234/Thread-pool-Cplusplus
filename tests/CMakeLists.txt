@@ -29,3 +29,4 @@ endfunction()
 # Test targets (one per milestone, added as we go)
 # ---------------------------------------------------------------------------
 add_gtest(test_thread_pool test_thread_pool.cpp)  # M1 smoke → grows each milestone
+add_gtest(test_task        test_task.cpp)         # M2 task_t type alias
