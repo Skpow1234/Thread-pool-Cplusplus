@@ -16,11 +16,17 @@ ThreadPool::ThreadPool(std::size_t num_threads) {
 }
 
 void ThreadPool::worker_loop(std::stop_token stoken) {
-    // M4: workers idle-loop with yield() until stop is requested.
-    // yield() hints to the OS to reschedule this thread, so we don't
-    // burn a core while waiting. Task execution is added in M5.
+    task_t task;
     while (!stoken.stop_requested()) {
-        std::this_thread::yield();
+        if (queue_.try_pop(task)) {
+            task();
+        } else {
+            // No work available: yield to the OS scheduler rather than
+            // burning the core. The cost is slightly higher wakeup latency
+            // compared to a condition_variable::wait, which is an accepted
+            // trade-off for the active-polling design (see docs/DESIGN.md).
+            std::this_thread::yield();
+        }
     }
 }
 
