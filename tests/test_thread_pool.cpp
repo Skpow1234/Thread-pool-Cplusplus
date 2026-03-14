@@ -2,8 +2,10 @@
 
 #include "thread_pool/thread_pool.hpp"
 
+#include <future>
 #include <memory>
 #include <numeric>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -132,4 +134,92 @@ TEST(ThreadPool, MultiThreadedSubmit) {
     // Sum of 0..kTotal-1
     const int expected = kTotal * (kTotal - 1) / 2;
     ASSERT_EQ(sum, expected);
+}
+
+// ---------------------------------------------------------------------------
+// M6: Exception propagation.
+//
+// std::packaged_task captures any exception thrown by the callable and stores
+// it in the shared state. future.get() then rethrows it on the calling thread.
+// The pool itself needs no changes — this comes for free.
+// ---------------------------------------------------------------------------
+
+// Standard library exception type propagates with the correct dynamic type.
+TEST(ThreadPool, ExceptionRuntimeError) {
+    ThreadPool pool{2};
+
+    auto f = pool.submit([] -> int {
+        throw std::runtime_error{"boom"};
+    });
+
+    ASSERT_THROW(f.get(), std::runtime_error);
+}
+
+// Derived exception type: only the base is caught, but the message is intact.
+TEST(ThreadPool, ExceptionMessagePreserved) {
+    ThreadPool pool{2};
+
+    auto f = pool.submit([] -> int {
+        throw std::runtime_error{"sentinel"};
+    });
+
+    try {
+        f.get();
+        FAIL() << "expected exception was not thrown";
+    } catch (const std::runtime_error& e) {
+        ASSERT_STREQ(e.what(), "sentinel");
+    }
+}
+
+// Non-standard (non-exception) throw type still propagates via future.
+// std::packaged_task stores it as std::exception_ptr, which re-throws correctly.
+TEST(ThreadPool, ExceptionNonStandardType) {
+    ThreadPool pool{2};
+
+    auto f = pool.submit([] -> int { throw 42; });
+
+    ASSERT_THROW(f.get(), int);
+}
+
+// After a throwing task the pool must remain fully operational.
+TEST(ThreadPool, PoolOperationalAfterException) {
+    ThreadPool pool{2};
+
+    // Throw in the first task.
+    auto bad = pool.submit([] -> int {
+        throw std::runtime_error{"transient"};
+    });
+    ASSERT_THROW(bad.get(), std::runtime_error);
+
+    // Pool must still execute subsequent tasks correctly.
+    auto good = pool.submit([] { return 7; });
+    ASSERT_EQ(good.get(), 7);
+}
+
+// Multiple tasks throw; all futures surface their individual exceptions;
+// tasks submitted after are still executed.
+TEST(ThreadPool, MultipleThrowingTasks) {
+    ThreadPool pool{4};
+
+    constexpr int kThrowing = 10;
+    std::vector<std::future<int>> futures;
+    futures.reserve(kThrowing);
+
+    for (int i = 0; i < kThrowing; ++i) {
+        futures.push_back(pool.submit([i] -> int {
+            throw std::runtime_error{std::to_string(i)};
+        }));
+    }
+
+    for (int i = 0; i < kThrowing; ++i) {
+        try {
+            futures[i].get();
+            FAIL() << "expected exception for task " << i;
+        } catch (const std::runtime_error& e) {
+            ASSERT_EQ(std::stoi(e.what()), i);
+        }
+    }
+
+    // Pool still works.
+    ASSERT_EQ(pool.submit([] { return 99; }).get(), 99);
 }
