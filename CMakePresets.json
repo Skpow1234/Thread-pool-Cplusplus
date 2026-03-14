@@ -1,0 +1,82 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+
+    {
+      "name": "debug",
+      "inherits": "base",
+      "displayName": "Debug",
+      "description": "Debug build, no sanitizers",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+
+    {
+      "name": "release",
+      "inherits": "base",
+      "displayName": "Release",
+      "description": "Optimised release build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+
+    {
+      "name": "asan-ubsan",
+      "inherits": "base",
+      "displayName": "Debug + ASan + UBSan",
+      "description": "Requires Clang or GCC with libasan/libubsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SANITIZE_ASAN_UBSAN": "ON"
+      }
+    },
+
+    {
+      "name": "tsan",
+      "inherits": "base",
+      "displayName": "Debug + TSan",
+      "description": "Requires Clang or GCC with libtsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SANITIZE_TSAN": "ON"
+      }
+    }
+  ],
+
+  "buildPresets": [
+    { "name": "debug",     "configurePreset": "debug"     },
+    { "name": "release",   "configurePreset": "release"   },
+    { "name": "asan-ubsan","configurePreset": "asan-ubsan" },
+    { "name": "tsan",      "configurePreset": "tsan"       }
+  ],
+
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "asan-ubsan",
+      "configurePreset": "asan-ubsan",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}
