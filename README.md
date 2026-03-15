@@ -16,24 +16,67 @@ A work-stealing thread pool in modern C++23, built with correctness and performa
 
 ---
 
+## Architecture
+
+The pool uses a **two-level work distribution** strategy:
+
+```
+External submit()
+      │
+      ▼
+┌─────────────────────┐     pop / steal
+│  CentralizedQueue   │ ──────────────────► worker threads
+│  (global, MPMC)     │                         │
+└─────────────────────┘               ┌──────────┴──────────┐
+                                      │  WorkStealingQueue  │  ◄── push (fast path)
+                                      │  per-worker, LIFO   │
+                                      └─────────────────────┘
+```
+
+**Worker loop priority** (highest → lowest):
+1. `pop_bottom` from own local deque (LIFO — owner gets its most-recently-pushed task, maximising cache reuse)
+2. `try_pop` from the global `CentralizedQueue`
+3. `steal_top` from a random peer's deque (FIFO end — leaves newer tasks for the owner)
+4. `std::this_thread::yield()` and retry
+
+**Key design decisions:**
+
+| Decision | Rationale |
+|----------|-----------|
+| `std::jthread` + `std::stop_token` | Cooperative cancellation; joins automatically on destruction |
+| `std::move_only_function<void()>` | Accepts move-only callables; avoids the copy-overhead of `std::function` |
+| `std::packaged_task` + `std::future` | Type-erased return value; composable with `std::when_all` etc. |
+| Lock-free Chase-Lev deque (M12) | Owner push/pop path acquires no mutex; thieves use CAS |
+| Fixed thread count | Simpler lifetime model; avoids thundering-herd on resize |
+| Active polling (`yield`) | Lower wake-up latency than condition-variable sleep for CPU-bound pools |
+
+---
+
 ## Project Structure
 
 ```bash
 Thread-pool-Cplusplus/
 ├── include/thread_pool/
-│   └── thread_pool.hpp       # Public API
+│   ├── thread_pool.hpp          # Public API (ThreadPool)
+│   ├── task.hpp                 # task_t alias (move_only_function<void()>)
+│   ├── centralized_queue.hpp    # Global overflow queue (MPMC, mutex-protected)
+│   └── work_stealing_queue.hpp  # Per-worker Chase-Lev deque (lock-free, M12)
 ├── src/
-│   └── thread_pool.cpp       # Implementation
+│   └── thread_pool.cpp          # ThreadPool implementation
 ├── tests/
-│   └── test_thread_pool.cpp  # Unit tests
+│   ├── test_thread_pool.cpp     # ThreadPool unit tests
+│   ├── test_queue.cpp           # Queue unit & stress tests
+│   └── test_task.cpp            # task_t type tests
 ├── benchmarks/
-│   └── bench_thread_pool.cpp # Benchmarks
+│   ├── bench_submit.cpp         # Submit throughput & round-trip latency (M9)
+│   ├── bench_fibonacci.cpp      # Parallel Fibonacci batch speedup (M13)
+│   └── bench_thread_pool.cpp    # Placeholder for future benchmarks
 ├── cmake/
-│   ├── sanitizers.cmake      # ASan / UBSan / TSan helpers
-│   └── clang-tidy.cmake      # clang-tidy integration
+│   ├── sanitizers.cmake         # ASan / UBSan / TSan helpers
+│   └── clang-tidy.cmake         # clang-tidy integration (custom tidy target)
 ├── docs/
-│   ├── DESIGN.md             # Architecture & milestones
-│   └── invariants.md         # Runtime invariants
+│   ├── DESIGN.md                # Architecture & milestone roadmap
+│   └── invariants.md            # Runtime invariants & benchmark baseline
 ├── CMakeLists.txt
 ├── CMakePresets.json
 └── .gitignore
@@ -178,14 +221,44 @@ cmake --build build/debug && ctest --preset debug --output-on-failure
 cmake --preset release
 cmake --build build/release --config Release
 
-./build/release/benchmarks/Release/bench_submit.exe
-./build/release/benchmarks/Release/bench_thread_pool.exe
+./build/release/benchmarks/Release/bench_submit.exe       # submit throughput & latency
+./build/release/benchmarks/Release/bench_fibonacci.exe    # parallel Fibonacci speedup
+
+# JSON output (for scripting / CI)
+./build/release/benchmarks/Release/bench_submit.exe --benchmark_format=json
 
 # Linux / macOS
 ./build/release/benchmarks/bench_submit
+./build/release/benchmarks/bench_fibonacci
 ```
 
-See `docs/invariants.md` for recorded baseline numbers.
+### Benchmark summary (MSVC Release, 32-core Threadripper PRO)
+
+**`bench_submit` — external submit throughput** (`BM_SubmitBatch/1000`)
+
+| workers | wall time | throughput |
+|--------:|----------:|-----------:|
+| 1       | 0.282 ms  | ~3.5 M/s   |
+| 2       | 0.376 ms  | ~2.7 M/s   |
+| 4       | 0.762 ms  | ~1.3 M/s   |
+| 8       | 1.85 ms   | ~0.5 M/s   |
+
+> Throughput falls with more workers because all external tasks go through the global
+> `CentralizedQueue` (one mutex).  For worker-submitted tasks the fast lock-free path
+> is used and contention vanishes.
+
+**`bench_fibonacci` — 16 independent `seq_fib(30)` tasks** (≈ 3 ms each)
+
+| workers | wall time | speedup |
+|--------:|----------:|--------:|
+| 1       | 51.7 ms   | 1.0×    |
+| 2       | 32.4 ms   | 1.6×    |
+| 4       | 16.0 ms   | 3.2×    |
+| 8       |  8.83 ms  | 5.9×    |
+
+> Near-linear parallel speedup for CPU-bound workloads.
+
+See `docs/invariants.md` for the full baseline and lock-free delta.
 
 ---
 

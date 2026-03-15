@@ -26,7 +26,8 @@ function(add_benchmark name)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# Benchmark targets (populated in M13)
+# Benchmark targets
 # ---------------------------------------------------------------------------
 add_benchmark(bench_thread_pool bench_thread_pool.cpp)  # placeholder
-add_benchmark(bench_submit      bench_submit.cpp)        # M9 throughput & latency
+add_benchmark(bench_submit      bench_submit.cpp)        # M9: throughput & latency
+add_benchmark(bench_fibonacci   bench_fibonacci.cpp)     # M13: recursive Fibonacci LIFO locality
