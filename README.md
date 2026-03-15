@@ -127,10 +127,26 @@ ctest --preset tsan-clang
 
 ### With clang-tidy *(requires `llvm` installed)*
 
+The `lint` preset configures the project with `ENABLE_CLANG_TIDY=ON`.
+A `tidy` custom target then runs clang-tidy on the production sources
+(`src/thread_pool.cpp` and all project headers it includes) using the
+include paths that CMake detected at configure time.
+
 ```bash
-cmake --preset debug -DENABLE_CLANG_TIDY=ON
-cmake --build build/debug
+# Configure once:
+cmake --preset lint
+
+# Check production sources (zero warnings required):
+cmake --build build/lint --target tidy
+
+# Full build + tests (optional):
+cmake --build build/lint
+ctest --test-dir build/lint --output-on-failure
 ```
+
+> **Note (Windows):** `scoop install llvm` is the only prerequisite.
+> The `lint` preset uses the default MSVC + Visual Studio generator,
+> so no Developer Command Prompt is required.
 
 ---
 

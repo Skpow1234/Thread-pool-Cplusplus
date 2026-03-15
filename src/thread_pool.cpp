@@ -5,7 +5,12 @@
 namespace tp {
 
 // Thread-local state — null/0 for any thread not owned by a ThreadPool.
+// NOLINT: cppcoreguidelines-avoid-non-const-global-variables — these are
+// intentionally thread_local (not truly global shared state).  Each worker
+// thread needs fast, lock-free access to its own queue pointer and index.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local WorkStealingQueue* ThreadPool::local_queue_ = nullptr;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local std::size_t        ThreadPool::thread_idx_  = 0;
 
 // Per-worker deque capacity (rounded up to next power of two by the deque).
@@ -63,7 +68,7 @@ bool ThreadPool::steal_from_peers(task_t& out) {
     const std::size_t n = worker_queues_.size();
     for (std::size_t i = 1; i < n; ++i) {
         const std::size_t target = (thread_idx_ + i) % n;
-        if (worker_queues_[target]->steal_top(out)) return true;
+        if (worker_queues_[target]->steal_top(out)) { return true; }
     }
     return false;
 }

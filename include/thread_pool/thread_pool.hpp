@@ -63,8 +63,11 @@ public:
     //
     // Fast path  — caller is a worker thread:  push to local deque.
     // Slow path  — caller is external thread:  push to global queue.
+    //
+    // [[nodiscard]]: dropping the future abandons exception propagation and
+    // makes it impossible to observe task completion.
     template <std::invocable F>
-    auto submit(F&& f) -> std::future<std::invoke_result_t<F>> {
+    [[nodiscard]] auto submit(F&& f) -> std::future<std::invoke_result_t<F>> {
         using R = std::invoke_result_t<F>;
 
         std::packaged_task<R()> ptask{std::forward<F>(f)};
@@ -87,7 +90,7 @@ public:
 
 private:
     void worker_loop(std::stop_token stoken, std::size_t idx);
-    bool pop_from_local(task_t& out);
+    static bool pop_from_local(task_t& out);   // uses only static thread_local state
     bool pop_from_global(task_t& out);
     bool steal_from_peers(task_t& out);
 

@@ -65,7 +65,7 @@ public:
 
     // Owner pushes a task onto the bottom (LIFO end).
     // Returns false if the buffer is full; the task is left untouched.
-    bool push_bottom(task_t task) {
+    [[nodiscard]] bool push_bottom(task_t task) {
         std::scoped_lock lock{mtx_};
         if (bottom_ - top_ >= capacity_) return false;
         buffer_[bottom_ & mask_] = std::move(task);
@@ -75,7 +75,7 @@ public:
 
     // Owner pops the most-recently-pushed task from the bottom (LIFO).
     // Returns false if empty.
-    bool pop_bottom(task_t& out) {
+    [[nodiscard]] bool pop_bottom(task_t& out) {
         std::scoped_lock lock{mtx_};
         if (bottom_ == top_) return false;
         --bottom_;
@@ -85,7 +85,7 @@ public:
 
     // Any thread may steal the oldest task from the top (FIFO).
     // Returns false if empty.
-    bool steal_top(task_t& out) {
+    [[nodiscard]] bool steal_top(task_t& out) {
         std::scoped_lock lock{mtx_};
         if (bottom_ == top_) return false;
         out = std::move(buffer_[top_ & mask_]);
@@ -107,6 +107,9 @@ public:
 
     WorkStealingQueue(const WorkStealingQueue&)            = delete;
     WorkStealingQueue& operator=(const WorkStealingQueue&) = delete;
+    WorkStealingQueue(WorkStealingQueue&&)                 = delete;
+    WorkStealingQueue& operator=(WorkStealingQueue&&)      = delete;
+    ~WorkStealingQueue()                                   = default;
 
 private:
     // Cold data: set at construction, never modified again.

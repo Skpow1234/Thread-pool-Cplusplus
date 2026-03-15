@@ -212,9 +212,9 @@ TEST(WorkStealingQueue, OwnerLIFOOrder) {
     WorkStealingQueue q{8};
     std::vector<int> order;
 
-    q.push_bottom([&order] { order.push_back(1); });
-    q.push_bottom([&order] { order.push_back(2); });
-    q.push_bottom([&order] { order.push_back(3); });
+    ASSERT_TRUE(q.push_bottom([&order] { order.push_back(1); }));
+    ASSERT_TRUE(q.push_bottom([&order] { order.push_back(2); }));
+    ASSERT_TRUE(q.push_bottom([&order] { order.push_back(3); }));
 
     ASSERT_EQ(q.size(), 3u);
 
@@ -233,9 +233,9 @@ TEST(WorkStealingQueue, ThiefFIFOOrder) {
     WorkStealingQueue q{8};
     std::vector<int> order;
 
-    q.push_bottom([&order] { order.push_back(1); });
-    q.push_bottom([&order] { order.push_back(2); });
-    q.push_bottom([&order] { order.push_back(3); });
+    ASSERT_TRUE(q.push_bottom([&order] { order.push_back(1); }));
+    ASSERT_TRUE(q.push_bottom([&order] { order.push_back(2); }));
+    ASSERT_TRUE(q.push_bottom([&order] { order.push_back(3); }));
 
     task_t t;
     while (q.steal_top(t)) t();
@@ -340,9 +340,9 @@ TEST(WorkStealingQueue, ConcurrentOwnerPopAndThiefSteal) {
 
     // Fill deque before starting any threads.
     for (std::size_t i = 0; i < kTasks; ++i) {
-        q.push_bottom([&counter] {
+        ASSERT_TRUE(q.push_bottom([&counter] {
             counter.fetch_add(1, std::memory_order_relaxed);
-        });
+        }));
     }
 
     // Launch thieves first, then owner pops — all run concurrently.

@@ -1,0 +1,73 @@
+---
+# Checks: enable four broad groups, then suppress with documented justification.
+# Every suppression comment explains the "why", not the "what".
+Checks: >
+  clang-diagnostic-*,
+  cppcoreguidelines-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -readability-magic-numbers,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -cppcoreguidelines-owning-memory,
+  -readability-use-anyofallof,
+  -performance-unnecessary-value-param,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
+
+# Suppressions — justification required for each entry:
+#
+#   cppcoreguidelines-avoid-magic-numbers / readability-magic-numbers
+#     Test-body literal values (e.g. 42, 99, 1000) are intentional test data,
+#     not opaque constants.  Creating named constants for every test sentinel
+#     adds noise without improving clarity.
+#
+#   modernize-use-trailing-return-type
+#     Traditional return-type syntax is preferred for readability in this
+#     codebase.  Trailing returns are already used where template deduction
+#     requires them (submit() -> future<R>).
+#
+#   readability-identifier-length
+#     Single-letter loop variables (i, n, j) and short parameters (t, f) are
+#     idiomatic in low-level concurrency code; enforcing a minimum length would
+#     reduce clarity, not improve it.
+#
+#   cppcoreguidelines-owning-memory
+#     Ownership is expressed via std::unique_ptr; raw pointer members are
+#     non-owning observers (e.g. thread_local WorkStealingQueue*).  Adding
+#     gsl::owner<> annotations would require a GSL dependency without benefit
+#     because unique_ptr already enforces the ownership contract.
+#
+#   readability-use-anyofallof
+#     steal_from_peers() uses an early-return loop whose "predicate" has a
+#     side-effect: it moves a task into the out-parameter.  std::any_of cannot
+#     express this pattern; the check produces a false positive here.
+#
+#   performance-unnecessary-value-param
+#     std::stop_token is a lightweight handle type explicitly designed to be
+#     passed by value (analogous to std::string_view).  Changing worker_loop's
+#     signature to const-reference would be technically equivalent but deviates
+#     from the canonical jthread callback idiom.
+#
+#   cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
+#     All vector subscript accesses (worker_queues_[idx], buffer_[mask&idx])
+#     are bounds-safe by design: indices are kept within [0, capacity) by the
+#     pool and deque invariants.  Using .at() would add exception-handling
+#     overhead to the hot path with no safety benefit.
+
+# Treat every triggered warning as an error so CI can enforce zero warnings.
+WarningsAsErrors: '*'
+
+# Analyse project headers; skip third-party headers (googletest, benchmark).
+HeaderFilterRegex: 'include/thread_pool/.*'
+
+FormatStyle: none
+
+CheckOptions:
+  # GTest-generated fixture classes delete copy operations (via the TEST() macro)
+  # but do not explicitly delete move operations — the moves are implicitly
+  # deleted because ::testing::Test is non-movable.  Without this option the
+  # rule would fire on every TEST() expansion even though the intent is clear.
+  - key:   cppcoreguidelines-special-member-functions.AllowMissingMoveFunctionsWhenCopyIsDeleted
+    value: 'true'

@@ -29,7 +29,7 @@ public:
 
     // Moves the front task into `out` and returns true.
     // Returns false without modifying `out` if the queue is empty.
-    bool try_pop(task_t& out) {
+    [[nodiscard]] bool try_pop(task_t& out) {
         std::scoped_lock lock{mtx_};
         if (queue_.empty()) return false;
         out = std::move(queue_.front());
@@ -48,8 +48,11 @@ public:
     }
 
     CentralizedQueue()                                   = default;
+    ~CentralizedQueue()                                  = default;
     CentralizedQueue(const CentralizedQueue&)            = delete;
     CentralizedQueue& operator=(const CentralizedQueue&) = delete;
+    CentralizedQueue(CentralizedQueue&&)                 = delete;
+    CentralizedQueue& operator=(CentralizedQueue&&)      = delete;
 
 private:
     mutable std::mutex  mtx_;
