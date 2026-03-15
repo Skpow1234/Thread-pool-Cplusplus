@@ -25,7 +25,9 @@ target_include_directories(thread_pool PUBLIC
 
 target_compile_options(thread_pool PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic -Werror>
-    $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX>
+    # /wd4324: "structure was padded due to alignment specifier" — intentional;
+    # top_ and bottom_ are aligned to separate cache lines by design (M9).
+    $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX /wd4324>
 )
 
 target_sanitizers(thread_pool)

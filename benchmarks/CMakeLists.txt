@@ -29,3 +29,4 @@ endfunction()
 # Benchmark targets (populated in M13)
 # ---------------------------------------------------------------------------
 add_benchmark(bench_thread_pool bench_thread_pool.cpp)  # placeholder
+add_benchmark(bench_submit      bench_submit.cpp)        # M9 throughput & latency

@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <new>      // std::hardware_destructive_interference_size
 #include <vector>
 
 namespace tp {
@@ -30,8 +31,20 @@ namespace tp {
 //   which is equivalent to modulo but a single instruction.
 //   Items occupy indices [top_, bottom_); the deque is empty when top_ == bottom_.
 //
-// Phase-A implementation (M7)
-// ───────────────────────────
+// Cache-line layout (M9)
+// ──────────────────────
+//   top_ and bottom_ are placed on separate cache lines using alignas.
+//   This prevents false sharing: when a thief writes top_ and the owner
+//   writes bottom_ on different cores, the hardware would otherwise force
+//   each write to invalidate the other core's cached copy of the shared line,
+//   causing a costly cross-core coherency round-trip on every push/pop/steal.
+//
+//   This is the correct layout for the upcoming lock-free upgrade (M12)
+//   where top_ and bottom_ will be std::atomic and written concurrently
+//   without a mutex.
+//
+// Phase-A implementation (M7/M9)
+// ───────────────────────────────
 //   A single std::mutex serialises all three operations.
 //   This is the correctness baseline; the lock-free Chase-Lev upgrade is M12.
 //
@@ -96,15 +109,27 @@ public:
     WorkStealingQueue& operator=(const WorkStealingQueue&) = delete;
 
 private:
+    // Cold data: set at construction, never modified again.
     const std::size_t   capacity_;
-    const std::size_t   mask_;      // capacity_ - 1; fast modulo via bitwise AND
+    const std::size_t   mask_;       // capacity_ - 1; fast modulo via bitwise AND
     std::vector<task_t> buffer_;
+    mutable std::mutex  mtx_;        // serialises all ops in the locked implementation
 
-    // Monotonically increasing; never reset. Wrapping is handled by mask_.
-    std::uint64_t top_{0};
-    std::uint64_t bottom_{0};
-
-    mutable std::mutex mtx_;
+    // Hot indices — each on its own cache line to prevent false sharing.
+    //
+    // top_    is read/written by thieves (steal_top).
+    // bottom_ is read/written by the owner (push_bottom / pop_bottom).
+    //
+    // Without this padding, a write to bottom_ by the owner would invalidate
+    // the cache line holding top_ on every thief core (and vice versa), turning
+    // logically independent accesses into a cross-core cache ping-pong.
+    //
+    // alignas(hardware_destructive_interference_size) guarantees each field
+    // starts on a fresh cache line; the compiler inserts padding in between.
+    // MSVC warning C4324 is suppressed in CMakeLists.txt (/wd4324) because
+    // this padding is intentional.
+    alignas(std::hardware_destructive_interference_size) std::uint64_t top_{0};
+    alignas(std::hardware_destructive_interference_size) std::uint64_t bottom_{0};
 };
 
 } // namespace tp
