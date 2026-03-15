@@ -223,3 +223,30 @@ TEST(ThreadPool, MultipleThrowingTasks) {
     // Pool still works.
     ASSERT_EQ(pool.submit([] { return 99; }).get(), 99);
 }
+
+// ---------------------------------------------------------------------------
+// M8: Work-stealing stress test.
+//
+// 8 worker threads, 100 000 tasks submitted from a single external thread.
+// Every task returns its index; the sum must equal the Gauss formula.
+// Verifies the full work-stealing pipeline under realistic load.
+// ---------------------------------------------------------------------------
+TEST(ThreadPool, WorkStealingStress100k) {
+    constexpr int kWorkers = 8;
+    constexpr int kTasks   = 100'000;
+
+    ThreadPool pool{kWorkers};
+
+    std::vector<std::future<int>> futures;
+    futures.reserve(kTasks);
+
+    for (int i = 0; i < kTasks; ++i) {
+        futures.push_back(pool.submit([i] { return i; }));
+    }
+
+    long long sum = 0;
+    for (auto& f : futures) sum += f.get();
+
+    // Sum of 0..kTasks-1 = kTasks * (kTasks-1) / 2
+    ASSERT_EQ(sum, static_cast<long long>(kTasks) * (kTasks - 1) / 2);
+}
