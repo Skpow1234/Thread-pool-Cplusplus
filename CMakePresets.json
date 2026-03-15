@@ -3,12 +3,24 @@
   "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
 
   "configurePresets": [
+
     {
       "name": "base",
       "hidden": true,
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+
+    {
+      "name": "base-clang",
+      "hidden": true,
+      "inherits": "base",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER":   "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
       }
     },
 
@@ -35,8 +47,19 @@
     {
       "name": "asan-ubsan",
       "inherits": "base",
-      "displayName": "Debug + ASan + UBSan",
-      "description": "Requires Clang or GCC with libasan/libubsan",
+      "displayName": "Debug + ASan + UBSan (default compiler)",
+      "description": "Requires Clang or GCC; MSVC falls back to plain debug with a warning",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SANITIZE_ASAN_UBSAN": "ON"
+      }
+    },
+
+    {
+      "name": "asan-ubsan-clang",
+      "inherits": "base-clang",
+      "displayName": "Debug + ASan + UBSan (Clang)",
+      "description": "Windows: scoop install llvm ninja  |  Linux/macOS: install clang",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "SANITIZE_ASAN_UBSAN": "ON"
@@ -46,8 +69,19 @@
     {
       "name": "tsan",
       "inherits": "base",
-      "displayName": "Debug + TSan",
-      "description": "Requires Clang or GCC with libtsan",
+      "displayName": "Debug + TSan (default compiler)",
+      "description": "Requires Clang or GCC; TSan is Linux/macOS only",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SANITIZE_TSAN": "ON"
+      }
+    },
+
+    {
+      "name": "tsan-clang",
+      "inherits": "base-clang",
+      "displayName": "Debug + TSan (Clang, Linux/macOS only)",
+      "description": "TSan is not available on Windows regardless of compiler",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "SANITIZE_TSAN": "ON"
@@ -56,10 +90,12 @@
   ],
 
   "buildPresets": [
-    { "name": "debug",     "configurePreset": "debug"     },
-    { "name": "release",   "configurePreset": "release"   },
-    { "name": "asan-ubsan","configurePreset": "asan-ubsan" },
-    { "name": "tsan",      "configurePreset": "tsan"       }
+    { "name": "debug",            "configurePreset": "debug"            },
+    { "name": "release",          "configurePreset": "release"          },
+    { "name": "asan-ubsan",       "configurePreset": "asan-ubsan"       },
+    { "name": "asan-ubsan-clang", "configurePreset": "asan-ubsan-clang" },
+    { "name": "tsan",             "configurePreset": "tsan"             },
+    { "name": "tsan-clang",       "configurePreset": "tsan-clang"       }
   ],
 
   "testPresets": [
@@ -74,8 +110,18 @@
       "output": { "outputOnFailure": true }
     },
     {
+      "name": "asan-ubsan-clang",
+      "configurePreset": "asan-ubsan-clang",
+      "output": { "outputOnFailure": true }
+    },
+    {
       "name": "tsan",
       "configurePreset": "tsan",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "tsan-clang",
+      "configurePreset": "tsan-clang",
       "output": { "outputOnFailure": true }
     }
   ]

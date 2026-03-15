@@ -98,18 +98,31 @@ cmake --preset release
 cmake --build build/release
 ```
 
-### Debug + ASan + UBSan *(Clang/GCC only)*
+### Sanitizer builds
+
+> **Sanitizer support matrix**
+>
+> | Preset | Compiler needed | Platform |
+> |--------|----------------|----------|
+> | `asan-ubsan-clang` | Clang (`scoop install llvm ninja`) | Windows, Linux, macOS |
+> | `tsan-clang` | Clang | Linux, macOS only |
+> | `asan-ubsan` | Clang or GCC (uses default compiler) | Linux, macOS |
+> | `tsan` | Clang or GCC (uses default compiler) | Linux, macOS |
+>
+> On **Windows + MSVC** the sanitizer presets build cleanly but emit a warning and
+> skip the `-fsanitize=` flags — tests still pass, just without instrumentation.
+> Install Clang via Scoop and use the `-clang` variants for real coverage.
 
 ```bash
-cmake --preset asan-ubsan
-cmake --build build/asan-ubsan
-```
+# ASan + UBSan (Clang — works on Windows after scoop install llvm ninja)
+cmake --preset asan-ubsan-clang
+cmake --build build/asan-ubsan-clang
+ctest --preset asan-ubsan-clang
 
-### Debug + TSan *(Linux/macOS, Clang/GCC only)*
-
-```bash
-cmake --preset tsan
-cmake --build build/tsan
+# TSan (Clang — Linux/macOS only)
+cmake --preset tsan-clang
+cmake --build build/tsan-clang
+ctest --preset tsan-clang
 ```
 
 ### With clang-tidy *(requires `llvm` installed)*
@@ -145,12 +158,18 @@ cmake --build build/debug && ctest --preset debug --output-on-failure
 ## Running Benchmarks
 
 ```bash
-# Windows (MSVC)
-./build/debug/benchmarks/Debug/bench_thread_pool.exe
+# Windows (MSVC or Clang) — Release build recommended for meaningful numbers
+cmake --preset release
+cmake --build build/release --config Release
+
+./build/release/benchmarks/Release/bench_submit.exe
+./build/release/benchmarks/Release/bench_thread_pool.exe
 
 # Linux / macOS
-./build/debug/benchmarks/bench_thread_pool
+./build/release/benchmarks/bench_submit
 ```
+
+See `docs/invariants.md` for recorded baseline numbers.
 
 ---
 
@@ -160,7 +179,7 @@ cmake --build build/debug && ctest --preset debug --output-on-failure
 |------|----------------|
 | CMake | 4.0 |
 | MSVC | 19.44+ (VS 2022 BuildTools) |
-| Clang | 17+ (for sanitizer presets) |
+| Clang | 17+ (for sanitizer / clang-tidy presets) |
 | GCC | 13+ |
 
 ---
